@@ -6,10 +6,10 @@
 
 ## 证据路径约定
 
-- 0.2.2-rc.1：`dsh/node_modules/@deepseek-ai/<pkg>/...`
-- 0.2.1-rc.5：`old021/dsh/node_modules/@deepseek-ai/<pkg>/...`
+- 0.2.2-rc.1：`asar022/dsh/node_modules/@deepseek-ai/<pkg>/...`
+- 0.2.1-rc.5：`asar021/dsh/node_modules/@deepseek-ai/<pkg>/...`
 
-`app.asar` 内路径 = 去掉 `x022a/` 前缀。行号即该文件行号。
+两版都用 `npx @electron/asar extract "<app.asar>" asar0xx` 解出；行号即该文件行号。
 
 ---
 
@@ -182,7 +182,7 @@ dsh --profile web --dump-config | Select-String "fs-observation-policy" -Context
 **验证方式**
 ```powershell
 node -p "require('./dsh/node_modules/@earendil-works/pi-ai/package.json').version"        # 1.3.0
-node -p "require('./old021/dsh/node_modules/@earendil-works/pi-ai/package.json').version"  # 1.1.0
+node -p "require('./asar021/dsh/node_modules/@earendil-works/pi-ai/package.json').version"  # 1.1.0
 # 行为：做一个必坏参数的 schema，发起两工具批次 → 期望 0 个工具执行 + 该响应终止
 ```
 

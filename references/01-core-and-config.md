@@ -6,19 +6,19 @@
 
 ## 证据路径约定
 
-本文所有 `证据：` 都指 asar 内的真实文件，行号即该文件行号。两份提取目录（只读使用）：
-
-- 0.2.2-rc.1：`dsh/node_modules/@deepseek-ai/<pkg>/...`
-- 0.2.1-rc.5：`old021/dsh/node_modules/@deepseek-ai/<pkg>/...`
-
-在 `app.asar` 里对应路径去掉 `x022a/` 前缀。重建提取（复现用）：
+本文所有 `证据：` 都指 asar 内的真实文件，行号即该文件行号。提取方式（只读）：
 
 ```powershell
-node 本次取证工作区\asar-read.mjs "本次取证工作区\work\asar022\app.asar" "本次取证工作区\work\x022a" `
-  "dsh/node_modules/@deepseek-ai/cordis/" "dsh/node_modules/@deepseek-ai/cordis-plugin-loader/" `
-  "dsh/node_modules/@deepseek-ai/cordis-plugin-include/" "dsh/node_modules/@deepseek-ai/dsh-app-boot/" `
-  "dsh/node_modules/@deepseek-ai/dsh-base/" "dsh/node_modules/@deepseek-ai/dsh/package.json"
+# 0.2.2 安装包里的 app.asar（安装目录下 resources/app.asar）
+npx @electron/asar extract "<install dir>\resources\app.asar" asar022
+# 0.2.1 对照：升级前先拷一份旧 app.asar，再解到 asar021
+npx @electron/asar extract "<old app.asar>" asar021
 ```
+
+- 0.2.2-rc.1：`asar022/dsh/node_modules/@deepseek-ai/<pkg>/...`
+- 0.2.1-rc.5：`asar021/dsh/node_modules/@deepseek-ai/<pkg>/...`
+
+同一文件在两版之间对照时，行号分别取自各自提取目录。
 
 ---
 
