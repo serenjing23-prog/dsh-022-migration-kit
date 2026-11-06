@@ -204,11 +204,7 @@ Start-Process -FilePath "$app\DeepSeek Harness.exe"; Start-Sleep -Seconds 15
 - `node -p "require('%USERPROFILE%/.dsh/profiles/desktop/package.json').dsh.profile.bundles.length"` 应等于预期数量（本机升级前 28）。
 - `Get-Content $profile\cordis.patch.yml -Raw` 非空且不是 `[]`；插件页里 profile 侧 `@deepseek-ai/*` 版本与应用版本一致。
 
----
-
 ## 复核清单
-
-命中任意一条即按对应小节迁移；四条都不命中可以只跑末尾的复核清单。
 
 | 检查 | 命令 | 期望 |
 |---|---|---|
