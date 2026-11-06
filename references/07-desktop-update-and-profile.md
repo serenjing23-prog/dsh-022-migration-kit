@@ -6,14 +6,14 @@
 
 | 前缀 | 实际路径 |
 |---|---|
-| `MAIN/` | `.update-investigation/work/x022c-07/lib/main.js`（0.2.2-rc.1 解包） |
-| `MAIN021/` | `.update-investigation/work/asar/lib/main.js`（0.2.1-rc.5，安装目录同源） |
-| `DHOST/` | `.update-investigation/work/x022c-07/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js` |
-| `DHOST021/` | `.update-investigation/work/x022c-07b/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js` |
-| `OB/` | `.update-investigation/work/x022c-06/dsh/node_modules/@deepseek-ai/dsh-official-bundles/lib/index.js` |
-| `FORGE-RM/` | `.update-investigation/work/x022c-06/dsh/node_modules/@deepseek-ai/dsh-experimental-forge-bundle/README.zh.md` |
-| `NSIS/` | `.update-investigation/work/x022c-07/node_modules/electron-updater/out/NsisUpdater.js` |
-| `RELNOTES.md` | `.update-investigation/RELNOTES.md` |
+| `MAIN/` | `lib/main.js`（0.2.2-rc.1 解包） |
+| `MAIN021/` | `lib/main.js`（0.2.1-rc.5，安装目录同源） |
+| `DHOST/` | `dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js` |
+| `DHOST021/` | `dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js` |
+| `OB/` | `dsh/node_modules/@deepseek-ai/dsh-official-bundles/lib/index.js` |
+| `FORGE-RM/` | `dsh/node_modules/@deepseek-ai/dsh-experimental-forge-bundle/README.zh.md` |
+| `NSIS/` | `node_modules/electron-updater/out/NsisUpdater.js` |
+| `RELNOTES.md` | `RELNOTES.md` |
 
 ---
 
@@ -37,7 +37,7 @@
    Copy-Item $p "$p.bak-worktree-$(Get-Date -Format yyyyMMdd-HHmmss)"
    # 手工编辑 dsh.profile.bundles：删掉 "@deepseek-ai/dsh-experimental-tool-worktree"
    ```
-   本机该条目是 `bundles` 的**第 5 项**（`.update-investigation/BRIEF.md:21`；文件 `C:\Users\Catherine\.dsh\profiles\desktop\package.json`），现在仍在列表里。
+   本机该条目是 `bundles` 的**第 5 项**（本机取证记录；文件 `%USERPROFILE%\.dsh\profiles\desktop\package.json`），现在仍在列表里。
 2. 在插件页启用「变更请求与工作树」（官方分组），确认 `create_worktree` 可用。
 3. `dependencies` 里的同名条目可保留（不影响加载），要清爽再用插件页卸载。
 
@@ -53,7 +53,7 @@
 ### 变更（**与发布说明存在偏差，需按实际代码理解**）
 - 发布说明：`Ralph 循环与会话搜索不再显示在实验性列表`（`RELNOTES.md:123`，英文 `:263`）。
 - 但 0.2.2-rc.1 实际数据里，两者**仍然**在 `EXPERIMENTAL_BUNDLES`（`OB:134` = `dsh-experimental-session-search`、`OB:137` = `dsh-experimental-ralph-bundle`），也仍在 `MORE_BUNDLES`（`OB:116`、`OB:119`）。
-- 0.2.1 判定实验性徽章用的是**包名前缀** heuristic（`.update-investigation/work/x022c-07b/…/dsh-client-ui-plugin-manager/lib/client.js:668`：`pkg.name.startsWith("@deepseek-ai/dsh-experimental-")`）；0.2.2 改成查集合（`.update-investigation/work/x022c-07/…/client.js:2633`：`beta: EXPERIMENTAL_BUNDLES.has(pkg.name)`）。两版结论相同：**这两个包在 rc.1 里仍带实验性徽章**。
+- 0.2.1 判定实验性徽章用的是**包名前缀** heuristic（`…/dsh-client-ui-plugin-manager/lib/client.js:668`：`pkg.name.startsWith("@deepseek-ai/dsh-experimental-")`）；0.2.2 改成查集合（`…/client.js:2633`：`beta: EXPERIMENTAL_BUNDLES.has(pkg.name)`）。两版结论相同：**这两个包在 rc.1 里仍带实验性徽章**。
 - 因此本 rc 里可观察的真实变化只有一条：它们都被放进 `MORE_BUNDLES`，主列表默认不展示，需在「更多」里找到（`OB:111-122`）。
 
 ### 症状
@@ -198,7 +198,7 @@ node -e "const fs=require('fs');const b=fs.readFileSync(process.argv[1]);const h
 # 真需要豁免时（先经用户同意，风险自负）：
 # & $dsh plugin --profile <profile> allow-version "<pkg>@<ver>" --dsh-version 0.2.2-rc.1 --accept-risk
 ```
-- 桌面 profile 可能被应用独占（`.update-investigation/BRIEF.md:96-97`），被拒时改在 GUI 插件页处理。
+- 桌面 profile 可能被应用独占（本机取证记录），被拒时改在 GUI 插件页处理。
 
 **回滚**：关应用 → 用备份覆盖 `package.json` / `cordis.patch.yml` / `pnpm-lock.yaml` → 用旧安装包重装同版本 → 启动。安装包与 pending 目录都可保留一段时间。
 
@@ -210,7 +210,7 @@ node -e "const fs=require('fs');const b=fs.readFileSync(process.argv[1]);const h
 - 每次启动只跑 `applyRelease()`，它做四件事：读运行时元数据、迁移**特定旧格式**的 `pnpm-workspace.yaml`、`createPluginProfile`（仅在文件缺失时创建 `package.json`/`cordis.patch.yml`/`pnpm-workspace.yaml`）、清理 0.1.5 遗留的 link projection（`MAIN:5577-5584`、`MAIN:5396-5411`、`MAIN:5548-5553`、`MAIN:5422-5431`）。注释原话：`prepare the external plugin profile without installing packages`（`MAIN:5575`）。
 - **不会**跑 pnpm、**不会**改 `dependencies` 的版本、**不会**改 `dsh.profile.bundles`（除恢复流程），也**不会**碰 `pnpm-lock.yaml`。0.2.1 的实现完全相同（`MAIN021:3591-3596`），所以这不是新增行为，而是需要持续记住的事实。
 - 恢复流程才会重写清单：`sanitizeProfile` 把 `cordis.patch.yml` 改名为 `cordis.patch.yml.bak-<Date.now()>`，并把 bundles 重置为 `PROFILE_TEMPLATES.web`（`@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-web-app`）；随后 `initProfile` 因文件缺失写入**空模板** `[]`（`MAIN:5517-5531`、`MAIN:5396-5409`）。
-- 本机证据：`C:\Users\Catherine\.dsh\profiles\desktop` 里有 5 个 `cordis.patch.yml.bak-<13 位毫秒>`（如 `cordis.patch.yml.bak-1793544442608`），命名与 `MAIN:5520` 的 `${patchPath}.bak-${Date.now()}` 完全一致——**2026-11-01 设置丢失就是这个恢复流程跑过**（`.update-investigation/BRIEF.md:51-53`）。
+- 本机证据：`%USERPROFILE%\.dsh\profiles\desktop` 里有 5 个 `cordis.patch.yml.bak-<13 位毫秒>`（如 `cordis.patch.yml.bak-1793544442608`），命名与 `MAIN:5520` 的 `${patchPath}.bak-${Date.now()}` 完全一致——**2026-11-01 设置丢失就是这个恢复流程跑过**（本机取证记录）。
 - 插件包管理失败会回滚 manifest 与 lockfile 到 pnpm 运行前快照（`PM-RM:130`），所以"插件装坏了"通常不会留下半截 `package.json`。
 
 ### 症状
@@ -234,7 +234,7 @@ node -e "const fs=require('fs');const b=fs.readFileSync(process.argv[1]);const h
 4. 不要用「禁用全部插件」来排障，除非你接受 patch 被改名 + bundles 被重置；排障优先用日志与 `--dump-config`。
 
 ### 验证方式
-- `node -p "require('C:/Users/Catherine/.dsh/profiles/desktop/package.json').dsh.profile.bundles.length"` 应等于你预期的数量（本机升级前是 28）。
+- `node -p "require('%USERPROFILE%/.dsh/profiles/desktop/package.json').dsh.profile.bundles.length"` 应等于你预期的数量（本机升级前是 28）。
 - `Get-Content $profile\cordis.patch.yml -Raw` 非空且不是 `[]`。
 - 插件页里 profile 侧 `@deepseek-ai/*` 版本与应用版本一致（不一致时列出清单逐个对齐）。
 

@@ -4,8 +4,6 @@
 
 **证据约定**：`021:` = 0.2.1-rc.5 安装包 `resources/app.asar` 的解包根；`022:` = 0.2.2-rc.1 安装包 `app.asar` 的解包根。行号均为该文件解包后的实际行号（minified ESM，单行可能很长）。标「推断」的结论没有直接代码证据，已附验证方法；其余均可按标注行号复核。
 
----
-
 ## 1. Node PTC 新增 VM Script 模式
 
 ### 变更
@@ -27,7 +25,7 @@
 
 ### 症状
 
-- 旧 profile 写 `executionMode: vm-script` 时 0.2.1 直接 schema 失败；反向（0.2.2 读旧配置）没有问题，默认仍是 `per-call`，所以**升级本身不会改变行为**——只有显式开启才变。
+- 升级本身不改变行为：旧配置在 0.2.2 上默认仍是 `per-call`；只有显式写 `vm-script` 才变。反过来**回退**到 0.2.1 时，`vm-script` 会 schema 失败。
 - 只加 `scriptPersistence: true` 而忘记改 `executionMode` 时，插件提供方加载失败，且报错发生在 PTC 首次被使用时，不在 profile 启动期，容易被误判成“PTC 坏了”。
 - `vm-script` 下写顶层 `return` 得到 `exception`；`using` 声明同样不支持（**推断**：代码只保证「可擦除 TypeScript」，`using` 属需降级的运行时语义，`022: …/lib/index.js:1341-1343` 的 `executionInstructions` 只声明顶层声明与 `await` 可用，未列 `using`）。
 - `vm-script` 顶层 `await import("node:fs")` 可用，但静态 `import`/`export` 不可用（脚本是 Script 而非 Module）。
@@ -35,21 +33,13 @@
 ### 迁移动作
 
 ```yaml
-# 0.2.1：只能二选一，没有 script 模式
+# 0.2.1：只能二选一
 - id: ptc-runtime
-  config:
-    executionMode: per-call        # 或 persistent-in-memory
+  config: { executionMode: per-call }        # 或 persistent-in-memory
 
-# 0.2.2：需要顶层 await + 表达式结果，但每次调用清零
+# 0.2.2：脚本模式（顶层 await + 表达式结果）；加 scriptPersistence 才跨调用保留
 - id: ptc-runtime
-  config:
-    executionMode: vm-script
-
-# 0.2.2：需要跨调用保留顶层变量（每个 Agent 一个 context）
-- id: ptc-runtime
-  config:
-    executionMode: vm-script
-    scriptPersistence: true
+  config: { executionMode: vm-script, scriptPersistence: true }
 ```
 
 - 只把 `vm-script` 当“语法开关”，不要把 context 当安全边界：`022: …/lib/index.js:1341` 明确 context 不是隔离边界，Node 访问仍受进程沙箱约束。
@@ -68,8 +58,6 @@ await fs.readdir(".");
 - 连续两次 `run_code`，第二次引用第一次的顶层 `var`：`scriptPersistence: true` 时成功，`false` 时抛引用错误。
 - 改一次会话沙箱模式后重跑：保留变量应被清空（`022: …/lib/index.js` 的 `PolicyProcesses` 在 `:1358` 定义，`:1368` 起监听 `sandbox/mode`）。
 
----
-
 ## 2. 原生/PTC 执行拆成按 Agent 作用域选择的插件
 
 ### 变更
@@ -81,7 +69,7 @@ await fs.readdir(".");
 - 0.2.2：`tools` 只做注册表与作用域分派，执行体由插件提供。
   - `mode` 与 `maxParallelSubCalls` 变成显式“已移除”字段，写入即 schema 报错：`022: dsh-tools/lib/index.js:407`（`mode: z.never().description("Removed. Mount a native or PTC tool executor instead.")`）、`:408`（`maxParallelSubCalls` 已移到执行器配置）。
   - 作用域选择 API：`setExecutor(executor)`（`022: dsh-tools/lib/index.js:598`，同一作用域只允许一个，重复注册抛 `Only one tool executor may be registered in each scope`）、`selectExecutor(scope)`（`:624`，按 scope 链就近解析，缺失时抛 `ToolExecutorUnavailableError`）。
-  - base 层两个执行器行：`022: dsh-base/cordis.patch.yml:498`（`tools`）、`:501`（`tool-executor-native`，启用）、`:504`（`tool-executor-ptc`，`disabled: true`）。
+  - base 层执行器相关行：`022: dsh-base/cordis.patch.yml:498`（`tools`）、`:501`（`tool-executor-native`，启用）、`:504`（`tool-executor-ptc`，`disabled: true`）。
   - PTC 由预设/overlay 挂载：`022: dsh-web-app/presets/ptc.patch.yml:125`（`- id: tool-executor-ptc` / `name: '@deepseek-ai/dsh-tool-executor-ptc'`）。
   - 环境变量彻底失效：`022: dsh-sdk-app/README.zh.md:26` 原文「`DSH_TOOLS_MODE` 不生效」。
 
@@ -102,8 +90,7 @@ await fs.readdir(".");
   disabled: true
 - id: tool-executor-ptc
   disabled: false
-  config:
-    maxParallelSubCalls: 10    # 原 tools.maxParallelSubCalls 的新家
+  config: { maxParallelSubCalls: 10 }   # 原 tools.maxParallelSubCalls 的新家
 ```
 
 3. 旧的 `tool-presentation`（`mode: ptc`）行不再需要，删除即可；PTC 语义已由执行器决定。
@@ -113,8 +100,6 @@ await fs.readdir(".");
 - `dsh --profile <p> --dump-config`：应看到 `tool-executor-native` 与 `tool-executor-ptc` 两行，且只有一个在该作用域生效。
 - 起一个 PTC 预设会话，模型侧工具清单应只有 `run_code`，没有逐个原生工具；标准预设反之。
 - 反向验证：把 overlay 里的 ptc 行 `disabled: true`，工具清单应回退为原生工具，且不报 `ToolExecutorUnavailableError`。
-
----
 
 ## 3. PTC Node 控制通道改用 birpc；bootstrap 与 SSH helper 必须同步升级
 
@@ -147,8 +132,6 @@ grep -c "openInheritedControlChannel" <deployed>/process.js
 
 - 跑一次远端（SSH）`run_code`：应返回正常结果，而不是第一条控制消息就失败。
 - 故意保留一份旧 bootstrap 指向 `launch.bootstrapPath`：应稳定复现 `… may be from another release`，以此确认自检有效。
-
----
 
 ## 4. run_code 的调用方取消改为 ABORTED
 
@@ -195,8 +178,6 @@ if (result.error?.name === "AbortError" || result.error?.code === "ABORTED") {
 - 发起一个长 `run_code`（例如 `await new Promise(r => setTimeout(r, 60000))`），中途取消：结果应是 `ABORTED` / `AbortError`，且 Session 里该调用不再被标为失败工具。
 - 同一提示词改为抛异常（`throw new Error("boom")`）：仍是 `CODE_RUN_FAILED`，`text` 含 `code run failed (exception): …`。
 
----
-
 ## 5. 与插件作者相关：run_code 的输出与 Schema
 
 ### 变更
@@ -205,7 +186,7 @@ if (result.error?.name === "AbortError" || result.error?.code === "ABORTED") {
 - **输出结构不变**：仍是 `{ logs: string[], result?: json, sandbox?: { mode, denied, enforcement? } }`，`render` 仍拼「logs + result + 沙箱部分强制提示」，空输出回落 `(run_code completed with no output)`：`022: …/lib/index.js:332-373`（对照 0.2.1 的同一函数 `021: dsh-tools/lib/index.js:1181` 起）。按结构消费的代码不需要改。
 - **Schema 文本变**：参数说明与 SDK 提示按运行时语法生成。
   - `resolveFlavor(runtime)`：只有 `language === "typescript" && programFormat === "function-body"` 才用 `TYPESCRIPT_FUNCTION_FLAVOR`，其余走 `RUN_CODE_FLAVORS[language]`（`022: …/lib/index.js:165`）。
-  - 面向模型的 SDK 说明由 `renderSdkInstructions(programFormat)` / `renderSdkProgramInstructions(programFormat)` 分支生成（`022: …/lib/index.js:915`、`:921`、`:962`）。
+  - 面向模型的 SDK 说明由 `renderSdkInstructions(programFormat)` / `renderSdkProgramInstructions(programFormat)` 分支生成（`022: …/lib/index.js:915`、`:921`、`:962`）。注意 `programFormat` 分支在 0.2.1 就有（`021: dsh-tools/lib/index.js:1777`、`:1824`），0.2.2 只是多了 `script` 这一条路径，结构未变。
   - `run_code` 控制参数未变：`timeoutMs`、`sandbox_permissions`、`justification`（`022: …/lib/index.js:134-146`）。
 - **并发配置换家**：`maxParallelSubCalls` 现在是执行器 Config（`022: …/lib/index.js:1701`，默认 10），不再是 `tools` 的字段。
 - **运行时取用方式**：`requirePtcRuntime(ctx)` / `ctx.get("ptcRuntime")`，不再有模块级 `peekRuntime()` 单例（`022: …/lib/index.js:372` 的 `ctx.get("ptcRuntime")?.sandboxMode`）。
@@ -226,8 +207,6 @@ if (result.error?.name === "AbortError" || result.error?.code === "ABORTED") {
 
 - 在 PTC 预设会话里取 `run_code` 的 JSON Schema：`programFormat: function-body` 时应出现 `return` 字样的示例，`script` 时应出现末尾表达式示例。
 - 执行一次返回图片的工具：结果里的图片应在下一步作为附件出现（`run_code` 输出结构未变）。
-
----
 
 ## 6. 0.2.2 下确认 PTC 正常的检查清单
 

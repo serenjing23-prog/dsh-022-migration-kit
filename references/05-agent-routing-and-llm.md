@@ -6,34 +6,26 @@
 
 | 前缀 | 实际路径 |
 |---|---|
-| `AGENT/` | `.update-investigation/work/x022c-05/dsh/node_modules/@deepseek-ai/dsh-agent/lib/index.js` |
+| `AGENT/` | `dsh/node_modules/@deepseek-ai/dsh-agent/lib/index.js` |
 | `AGENT-RM/` | `…/@deepseek-ai/dsh-agent/README.zh.md`（0.2.2-rc.1 解包） |
-| `PIAI/` | `.update-investigation/work/x022c-05/dsh/node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js` |
+| `PIAI/` | `dsh/node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js` |
 | `PIAI-RM/` | `…/@deepseek-ai/dsh-llm-pi-ai/README.zh.md` |
-| `PIAI021/` | `.update-investigation/work/x022c-05b/dsh/node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js`（0.2.1-rc.5 同位置） |
+| `PIAI021/` | `dsh/node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js`（0.2.1-rc.5 同位置） |
 | `FETCH/` `FETCH-RM/` | `…/@deepseek-ai/dsh-web-fetch-http/lib/index.js`、`README.zh.md`（0.2.2） |
-| `FETCH021/` | `.update-investigation/work/x022c-05b/dsh/node_modules/@deepseek-ai/dsh-web-fetch-http/lib/index.js`（0.2.1） |
-| `FETCH021-RM/` | `.update-investigation/work/x022c-05b/dsh/node_modules/@deepseek-ai/dsh-web-fetch-http/README.zh.md` |
-| `RELNOTES.md` | `.update-investigation/RELNOTES.md` |
+| `FETCH021/` | `dsh/node_modules/@deepseek-ai/dsh-web-fetch-http/lib/index.js`（0.2.1） |
+| `FETCH021-RM/` | `dsh/node_modules/@deepseek-ai/dsh-web-fetch-http/README.zh.md` |
+| `RELNOTES.md` | `RELNOTES.md` |
 
 ---
 
 ## 0. 影响面速判（30 秒）
 
-命中任意一条就需要按本文逐节迁移；四条全不命中可以只做末尾的「复检清单」。
+命中任意一条就需要按本文逐节迁移；四条全不命中可以只做末尾的「复核清单」。静态检查脚本统一放在 §7。
 
 - [ ] 插件里有**写入** `agent/request` 的 `config.provider` / `config.model` / `reasoningEffort` 的代码。
 - [ ] 插件靠包装 `fetch`、改全局 header 或适配器外层来注入传输请求头。
-- [ ] profile 里接入了**非 1M 上下文**的自定义模型，且没有显式写 `contextWindow` / `maxOutputTokens`。
-- [ ] 部署里把 Web Fetch 当成"只能抓公网"的安全边界（或反之，正等着它支持内网）。
-
-判定所需的三个静态检查（在插件目录执行即可）：
-
-```powershell
-grep -rn "agent/request" .                     # 只应剩读取
-grep -rn "agent\.model\.select\|installModelSelection" .
-grep -rn "contextWindow\|maxOutputTokens\|defaultContextWindow" .
-```
+- [ ] profile 接入了**非 1M 上下文**的自定义模型，且没显式写 `contextWindow` / `maxOutputTokens`。
+- [ ] 部署把 Web Fetch 当成"只能抓公网"的安全边界（或反之，正等着它支持内网）。
 
 ---
 
@@ -152,7 +144,7 @@ ctx.on('llm-pi-ai/request-headers', (request, headers, next) => {
 ## 5. Web Fetch 不再拒绝非公网地址（安全边界变化）
 
 ### 变更
-- 0.2.1：只接受公共单播目标，主机名只解析一次、任一非公网地址即**拒绝整个结果**并把连接固定到已校验地址（`FETCH021-RM:64`、实现注释 `FETCH021-RM:129`、`:144`）。
+- 0.2.1：只接受公共单播目标，主机名只解析一次、任一非公网地址即**拒绝整个结果**并把连接固定到已校验地址（`FETCH021-RM:64`；实现注释「连接不能二次解析到私网地址」见 `FETCH021:12`，「否则正好到达这些检查要挡住的 loopback/私有服务」见 `FETCH021:129`，代理/loopback 属于受支持目标的说明见 `FETCH021:144`）。
 - 0.2.2：删除该限制——请求走进程级 dispatcher（代理策略生效），目标地址由系统解析器选择，**任何目标地址都被允许**（`FETCH-RM:64`、`FETCH-RM:135`）。`FETCH/` 中已无 private/loopback 判定（grep `private|loopback|127.0.0` 零命中）。
 - 相对的兼容修复：编码声明混含 UTF-8 的可读页面现在能被解码（`RELNOTES.md:73`）。
 
@@ -174,7 +166,46 @@ ctx.on('llm-pi-ai/request-headers', (request, headers, next) => {
 
 ---
 
-## 复核清单（升级后一次跑完）
+## 6. 失败面速查：这些错误码现在意味着什么
+
+`dsh-llm-pi-ai` 的失败被收敛到少数稳定码上（导入清单见 `PIAI:2`），升级后**按码分流**比按文案匹配可靠：
+
+| 错误码 | 触发点 | 升级后常见成因 | 处置 |
+|---|---|---|---|
+| `REQUEST_HEADERS` | 请求发出前（§2） | 插件头非法、贡献器抛错、忘了 `next()` | 修头或修贡献器；不会产生半截请求 |
+| `CONTEXT_WINDOW_EXCEEDED` | 请求/响应期间用 `contextWindow` 判溢出 | 容量被默认 1M 放大后**更晚**才触发（§4） | 显式设容量；别用默认值跑小端点 |
+| `IMAGE_OFFLOAD_REQUIRED` | 图片数/字节超限 | 图片上限与卸载策略按 provider 配置（`maxRequestImages` 默认 50，`PIAI:1134`） | 调 `maxRequestImages` / `maxRequestImageBytes` |
+| `INVALID_CREDENTIAL` | 认证阶段 | 升级后凭据平面变化、env 名不同 | 重填凭据，不要改代码 |
+| `QUOTA_EXCEEDED` | 端点返回配额错误 | 与路由/计费无关的透传 | 换 key 或换路由 |
+| `EMPTY_RESPONSE` | 响应解析后无内容 | 网关返回空/被截断（常与 §3 的工具参数格式错误同源） | 查网关日志，别重试打满 |
+
+排查顺序建议：`REQUEST_HEADERS` → `INVALID_CREDENTIAL` → `CONTEXT_WINDOW_EXCEEDED` → 其余。前两个是"我们发不出去"，第三个是"发出去太多"，剩下的一般在端点侧。
+
+---
+
+## 7. 插件自检脚本（一次性）
+
+把 `<插件目录>` 换成你的包根目录；四项全绿再合并：
+
+```powershell
+# 1) 路由改写必须清零（允许读取）
+grep -rn "agent/request" <插件目录>
+
+# 2) 选择入口必须存在（至少一处）
+grep -rn "agent\.model\.select\|installModelSelection" <插件目录>
+
+# 3) 容量必须显式（没有输出=用的是默认 1M/128K，危险）
+grep -rn "contextWindow\|maxOutputTokens\|defaultContextWindow\|defaultMaxTokens" <插件目录>
+
+# 4) 头注入只走 waterfall（不应再出现包装 fetch 的痕迹）
+grep -rn "llm-pi-ai/request-headers\|globalThis.fetch\|prepareHeaders" <插件目录>
+```
+
+期望：1) 空；2) ≥1 行；3) 非空（如果该插件确实接了小端点）；4) 只命中 `llm-pi-ai/request-headers`。
+
+---
+
+## 8. 复核清单（升级后一次跑完）
 
 | 检查 | 命令/位置 | 期望 |
 |---|---|---|
@@ -187,5 +218,5 @@ ctx.on('llm-pi-ai/request-headers', (request, headers, next) => {
 
 **推断项（需复核）**
 1. `purpose` 的取值集合：本版解包中 `PIAI:1856` 只做透传，`dsh-llm`、`dsh-llm-pi-ai`、`dsh-agent-loop` 内均无赋值点（推断由标题/审核等辅助调用方注入）。复核：在 `llm-pi-ai/request-headers` 里 `console.log(request.purpose)`，跑一次会话标题生成与一次 Auto 审核，观察实际字符串。
-2. 「Web Fetch 在 0.2.1 曾拒绝私网」的**具体错误码**未在本文件引用（只引了 README 与实现注释的行为描述）。复核：用 0.2.1 的 `FETCH021-RM/` 同目录 `lib/index.js` 搜索该错误消息常量。
+2. 「Web Fetch 在 0.2.1 曾拒绝私网」用的**具体错误码**未在本文引用。复核：在 `FETCH021/` 里搜该错误消息常量，确认被删掉的判定返回什么码，避免旧监控按码匹配失效。
 3. 1M/128K 是否会被显式 `defaultContextWindow` 之外的第二层（会话级设置）覆盖，未在本文件验证。复核：改 `defaultContextWindow` 后看 `--dump-config` 与运行时压缩点是否一致。

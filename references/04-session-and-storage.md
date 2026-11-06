@@ -4,8 +4,6 @@
 
 **证据约定**：`021:` = 0.2.1-rc.5 安装包 `app.asar` 解包根，`022:` = 0.2.2-rc.1 安装包 `app.asar` 解包根；行号为文件内实际行号。标「推断」的结论已附验证方法。
 
----
-
 ## 1. Session API 拆出独立接口：快照 / 事件日志订阅 / 运行状态 / 事件投影
 
 ### 变更
@@ -54,8 +52,6 @@ await remote["session/wait"]({ sessionId });                         // 等运�
 
 - 断线重连后：`session/events` 的 `cursor` 应能续读、不重不漏；`observeState` 应在运行状态变化时逐次推送。
 - 对一个不存在的 sessionId 调 `observeEvent`：应只收到无游标的 `ready`，不报“不存在”；而 `state`/`events` 应明确失败或返回空。
-
----
 
 ## 2. Session Projection 注册 API 改为异步（启动时必须持有 handle）
 
@@ -107,8 +103,6 @@ async apply(ctx) {
 - 同一 key 由两个插件注册时共享一个 cell；`stateVersion` 不一致应被拒绝（`022: …/lib/index.js:115` 起）。
 - 只注册不读：`snapshot(session, keys)` 应给出一致视图，未注册 key 缺席。
 
----
-
 ## 3. 创建 / 恢复 / 销毁期间的事件发布与清理顺序
 
 ### 变更
@@ -121,7 +115,7 @@ SessionStore 的“进入—宣告—移除”状态机从两个布尔改成四�
 | 写入门禁 | 只校验“仍在 store 里”（`liveEntryFor`，`021: …:1972`） | 额外要求宣告完成：`entry.announcement !== "complete"` 即抛 `cannot append before session/created completes`（`022: …:1579`） |
 | `announce()` | 派发**前**就置 `announced = true`（`021: …:1904`），无失败态 | 四态 `pending → dispatching → complete/failed`（`022: …:1879`、`:1922`、`:1935`、`:1937`） |
 | `detachEntered()` | `attachments.delete(...)`，`if (entry.announced) emitDisposed`（`021: …:1886`、`:1892`） | `attachments.set(entry.session, null)`，`if (entry.announcement !== "pending") emitDisposed`（`022: …:1901`、`:1907`） |
-| 派发中移除 | 只在 `!entry.appending` 时立即 detach | `detachRequested` 延迟到派发/追加结束（`022: …:1892`、`:1922` 的 finally） |
+| 派发中移除 | 只在 `!entry.appending` 时立即 detach | `detachRequested` 延迟到派发/追加结束（`022: …:1892` 的延迟判定、`:1939-1940` 的 announce 收尾、`:1605` 的 append 收尾） |
 
 - 行为汇总在文档里：`022: dsh-session/README.zh.md:34` —— 独立实例进入 Store 时不把已有历史重放为 `session/event`；创建监听器只能读，且能看到**全部已有历史**；宣告失败或移除后仍禁止写入；**只有开始过宣告的实例**在移除时发 `session/disposed`，宣告失败也不例外；进入但从未宣告的实例两个通知都不发。
 
@@ -144,8 +138,6 @@ SessionStore 的“进入—宣告—移除”状态机从两个布尔改成四�
 - 注册一个抛异常的 `session/created` 监听器：会话应不可写、重试宣告被拒，卸载时仍收到 `session/disposed`。
 - 在 `session/created` 里 `append`：应抛上述错误；把同一次写入挪到宣告之后成功。
 - 恢复一个长历史会话：创建监听器读到的历史条数应等于持久日志条数。
-
----
 
 ## 4. 整单元 JSON / SQLite 存储：读“领域声明的旧版本”，写“当前版本格式”
 
@@ -178,8 +170,6 @@ SessionStore 的“进入—宣告—移除”状态机从两个布尔改成四�
 - 手工造一个 `{"unit":{"name":"<n>","version":<n-1>},…}` 文件 → 打开并写一次 → 断言文件里的 `unit.version` 等于当前版本。
 - 再换成未声明的版本号：应在打开时报 `version-mismatch`。
 - 若你有 SQLite 后端副本：用同法验证“读旧戳、写新戳”，并检查其 descriptor 是否同样透传 `compatibleVersions`。
-
----
 
 ## 5. 会话分支（fork）独立运行，不再被误识别为子智能体
 
@@ -217,8 +207,6 @@ const isSubagent = session.header.origin === "subagent";
 - 对一个会话执行 fork，再读取新会话 header：`origin` 应为 `undefined`，`isSeeded` 为真，且它出现在会话列表里、可以被恢复。
 - 起一个真实 `subagent`：`origin` 应为 `"subagent"`，在只允许普通会话的列表/恢复入口里被排除。
 - 用旧判断复跑同一场景应能复现误判（回归测试保留两条断言）。
-
----
 
 ## 复核建议（给审查者）
 

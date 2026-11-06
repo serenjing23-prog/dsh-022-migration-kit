@@ -8,13 +8,13 @@
 
 本文所有 `证据：` 都指 asar 内的真实文件，行号即该文件行号。两份提取目录（只读使用）：
 
-- 0.2.2-rc.1：`.update-investigation/work/x022a/dsh/node_modules/@deepseek-ai/<pkg>/...`
-- 0.2.1-rc.5：`.update-investigation/work/x022a/old021/dsh/node_modules/@deepseek-ai/<pkg>/...`
+- 0.2.2-rc.1：`dsh/node_modules/@deepseek-ai/<pkg>/...`
+- 0.2.1-rc.5：`old021/dsh/node_modules/@deepseek-ai/<pkg>/...`
 
 在 `app.asar` 里对应路径去掉 `x022a/` 前缀。重建提取（复现用）：
 
 ```powershell
-node .update-investigation\asar-read.mjs ".update-investigation\work\asar022\app.asar" ".update-investigation\work\x022a" `
+node 本次取证工作区\asar-read.mjs "本次取证工作区\work\asar022\app.asar" "本次取证工作区\work\x022a" `
   "dsh/node_modules/@deepseek-ai/cordis/" "dsh/node_modules/@deepseek-ai/cordis-plugin-loader/" `
   "dsh/node_modules/@deepseek-ai/cordis-plugin-include/" "dsh/node_modules/@deepseek-ai/dsh-app-boot/" `
   "dsh/node_modules/@deepseek-ai/dsh-base/" "dsh/node_modules/@deepseek-ai/dsh/package.json"
@@ -59,7 +59,7 @@ class MyTree extends EntryTree {
 **验证方式**
 ```powershell
 # 1) 版本
-node -e "const p=require('./.update-investigation/work/x022a/dsh/package.json');console.log(p.dependencies['@deepseek-ai/cordis'],p.dependencies['@deepseek-ai/cordis-plugin-loader'],p.dependencies['@deepseek-ai/cordis-plugin-include'])"
+node -e "const p=require('./dsh/package.json');console.log(p.dependencies['@deepseek-ai/cordis'],p.dependencies['@deepseek-ai/cordis-plugin-loader'],p.dependencies['@deepseek-ai/cordis-plugin-include'])"
 # 2) 你的插件是否还在实现旧的 EntryTree
 Select-String -Path "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\*\lib\*.js" -Pattern "extends EntryTree|extends Include" | Select-Object Path,LineNumber
 # 3) 启动后无 include 报错（非 desktop profile 才可用 --profile）
@@ -128,8 +128,8 @@ Select-String -Path "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\*\lib\*
 **验证方式**
 ```powershell
 node -p "process.versions.node"                       # 期望 >= 24.9.0
-node -p "require('./.update-investigation/work/x022a/dsh/node_modules/@deepseek-ai/dsh/package.json').engines.node"
-& "C:\Users\Catherine\AppData\Local\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" --version
+node -p "require('./dsh/node_modules/@deepseek-ai/dsh/package.json').engines.node"
+& "<DSH install dir>\resources\runtime\cli\bin\dsh.cmd" --version
 ```
 
 ---

@@ -28,6 +28,13 @@ semver.satisfies(runtimeVersion, range, { includePrerelease: true })
 | --- | --- |
 | `SKILL.md` | 技能入口：硬规则、预检 → 分类 → 修复 → 验证 → 回滚的决策树 |
 | `references/breaking-changes.md` | **全部 30 项**变更，按运行时/工具 PTC/会话/模型/插件生态/桌面分组 |
+| `references/01-core-and-config.md` | Cordis 4.1 / Loader 1.1 / Include 1.1、Fiber 统一配置、Node 24.9、`cordis.patch.yml` 风险 |
+| `references/02-tools-and-prompt.md` | 工具条件启用与提示词组装、执行器拆分、`apply_patch`、观察策略、pi-ai 1.3 |
+| `references/03-ptc-runtime.md` | PTC VM Script、birpc 控制通道、SSH 协议 2→3、`ABORTED` |
+| `references/04-session-and-storage.md` | Session API 拆分、Projection 异步化、事件顺序、存储格式 |
+| `references/05-agent-routing-and-llm.md` | `agent.model` 路由、动态请求头、模型容量默认值、Web Fetch 放行 |
+| `references/06-plugin-manifest-and-gate.md` | 兼容门语义、预发布 semver、`official-bundles`、插件索引与安装诊断 |
+| `references/07-desktop-update-and-profile.md` | 桌面更新、worktree 合并、更新安装排障、profile 修复 runbook |
 | `references/plugin-api-migration.md` | 插件作者用：工具注册、投影异步化、模型路由、请求头、清单门禁的 before/after |
 | `references/upgrade-runbook.md` | Windows 升级 runbook：校验 → 备份 → 预检 → 关进程 → 静默安装 → 验证 → 回滚 |
 | `scripts/check-profile-compat.mjs` | 零依赖预检脚本：算出升级后哪些 bundle 会被 skip、哪些退役、哪些和官方重复 |
@@ -109,10 +116,18 @@ dsh-022-migration-kit/
 ├── LICENSE
 ├── references/
 │   ├── breaking-changes.md
+│   ├── 01-core-and-config.md
+│   ├── 02-tools-and-prompt.md
+│   ├── 03-ptc-runtime.md
+│   ├── 04-session-and-storage.md
+│   ├── 05-agent-routing-and-llm.md
+│   ├── 06-plugin-manifest-and-gate.md
+│   ├── 07-desktop-update-and-profile.md
 │   ├── plugin-api-migration.md
 │   └── upgrade-runbook.md
 ├── scripts/
-│   └── check-profile-compat.mjs
+│   ├── check-profile-compat.mjs
+│   └── install-0.2.2.ps1
 └── data/
     ├── official-bundles-0-2-2-rc-1.json
     └── duplicates.json

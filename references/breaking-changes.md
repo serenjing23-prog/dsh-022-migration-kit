@@ -1,6 +1,6 @@
 # DSH 0.2.2-rc.1 — 全部开发者向破坏性变更（30 项）
 
-来源：官方 `v0.2.2-rc.1` release notes「其他变更」段（`.update-investigation/RELNOTES.md` 第 111-141 行），
+来源：官方 `v0.2.2-rc.1` release notes「其他变更」段（官方 release notes「其他变更」段；摘录见 `data/release-notes-dev-section.md`），
 并对 0.2.2-rc.1 `app.asar` 做了源码核对。每条标注 **证据**（可直接查证）或 **推断**（需本地验证）。
 面向两类读者：**升级 profile 的人**（A 列动作）与 **插件作者**（B 列动作）。
 
@@ -33,7 +33,9 @@
 - **变更**：旧运行时（22.x/24.0-24.8）不被支持。
 - **A 动作**：自部署/CLI 用户先升 Node；桌面版自带运行时，不受影响。
 - **症状**：启动即失败，或语法错误（新 API 在旧 Node 上不存在）。
-- **验证**：`node -v` ≥ 24.9（`@deepseek-ai/dsh` 桌面运行时为 44.7.0 的 Electron 内置 Node，无需处理）。
+- **验证**：`node -v` ≥ 24.9。**桌面版不受影响**：两版自带 runtime 的 `release.nodeVersion` 都是 24.21.0
+  （0.2.1 与 0.2.2 相同），只有 CLI / SDK / 自部署 / CI 会踩这条
+  （证据：`desktop-runtime.json` 的 `release.nodeVersion`；`@deepseek-ai/dsh@0.2.2-rc.1` `package.json` 新增 `engines.node: ">=24.9.0"`）。
 
 ### 4. cordis.patch.yml / profile 配置层的升级风险
 - **变更**：这不是官方条目，而是 2026-11-01 本机真实事故：DSH 升级把用户

@@ -52,14 +52,20 @@ merged into "Change requests and worktrees" (`证据:` official release notes,
 
 ## 2. Triage the change class
 
-Read only the section you need:
+Start from the full list, then open the deep-dive that matches:
 
-- **Tools / PTC / prompt assembly** → `references/plugin-api-migration.md#tools`
-- **Session, projections, storage** → `references/plugin-api-migration.md#session`
-- **Model routing, request headers, pi-ai** → `references/plugin-api-migration.md#llm`
-- **Manifest gate, official bundles, plugin market** → `references/plugin-api-migration.md#manifest`
-- **Full change list (all 30 items)** → `references/breaking-changes.md`
-- **Install / repair / rollback commands** → `references/upgrade-runbook.md`
+| change class | deep-dive |
+| --- | --- |
+| Cordis 4.1 / Loader 1.1 / Include 1.1、Fiber 配置、Node 24.9、`cordis.patch.yml` | `references/01-core-and-config.md` |
+| 工具条件启用、`tools.resolve`/`executable`、执行器拆分、`apply_patch`、观察策略、pi-ai 1.3 | `references/02-tools-and-prompt.md` |
+| PTC：VM Script、birpc、SSH 协议 3、`ABORTED`、`tools.mode` 迁移 | `references/03-ptc-runtime.md` |
+| Session API 拆分、Projection 异步、事件顺序、存储格式 | `references/04-session-and-storage.md` |
+| `agent.model` 路由、动态请求头、模型容量默认值、Web Fetch 放行 | `references/05-agent-routing-and-llm.md` |
+| 兼容门语义、预发布 semver、`official-bundles`、插件索引/安装诊断 | `references/06-plugin-manifest-and-gate.md` |
+| 桌面更新、worktree 合并、Ralph/搜索分类、更新安装排障 | `references/07-desktop-update-and-profile.md` |
+| **全部 30 项总表**（变更→症状→迁移→验证） | `references/breaking-changes.md` |
+| 插件作者 before/after 配方 | `references/plugin-api-migration.md` |
+| 安装/修复/回滚命令 | `references/upgrade-runbook.md` |
 
 ## 3. Repair decision table
 
@@ -116,6 +122,8 @@ Then reinstall the previous desktop version if the runtime itself is broken.
 ## 7. References
 
 - `references/breaking-changes.md` — all 30 developer-facing changes, 变更→症状→迁移→验证.
+- `references/01-core-and-config.md` … `07-desktop-update-and-profile.md` — 按主题的深挖版，
+  含 0.2.1 vs 0.2.2 源码对照与文件行号。
 - `references/plugin-api-migration.md` — before/after API recipes with evidence paths.
 - `references/upgrade-runbook.md` — Windows install/repair/rollback runbook.
 - `data/official-bundles-0-2-2-rc-1.json` — official bundle lists extracted from `@deepseek-ai/dsh-official-bundles@0.2.2-rc.1`.

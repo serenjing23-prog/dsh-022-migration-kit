@@ -6,8 +6,8 @@
 
 | 前缀 | 实际路径 |
 |---|---|
-| `APP-BOOT/` | `.update-investigation/work/x022c-06/dsh/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js`（0.2.2-rc.1） |
-| `APP-BOOT021/` | `.update-investigation/work/asar/dsh/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js`（0.2.1-rc.5） |
+| `APP-BOOT/` | `dsh/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js`（0.2.2-rc.1） |
+| `APP-BOOT021/` | `dsh/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js`（0.2.1-rc.5） |
 | `PM/` | `…/dsh-plugin-manager/lib/index.js` |
 | `PM-RM/` | `…/dsh-plugin-manager/README.zh.md` |
 | `PM-T/` | `…/dsh-plugin-manager/lib/types/`（`failure.js`、`operations.js`、`diagnostic.js`、`tools.js`） |
@@ -15,7 +15,7 @@
 | `MARKET-RM/` | `…/dsh-plugin-market/README.zh.md` |
 | `MKT-UI/` | `…/dsh-client-ui-plugin-market/lib/client.js` |
 | `PM-UI/` | `…/dsh-client-ui-plugin-manager/lib/client.js` |
-| `RELNOTES.md` | `.update-investigation/RELNOTES.md` |
+| `RELNOTES.md` | `RELNOTES.md` |
 
 ---
 
@@ -33,7 +33,7 @@
 ### 症状
 - 启动 stderr / Host 日志出现 `skipping profile bundle`，GUI 插件页那条消失（不是"禁用"，是没被加载）。原文形状：
   `Plugin <pkg>@<ver> is incompatible with dsh 0.2.2-rc.1: requirements {"@deepseek-ai/dsh-…":"…"}. Running it may cause crashes or data loss. … grant the exact-version exemption for <pkg>@<ver> on dsh 0.2.2-rc.1 with \`dsh plugin allow-version\` … Exact-version exemption: not active.`
-- 0.2.1 上已实测过一次：`@zebbkira/dsh-skills-mcp-manager@0.2.0` 要求 `@deepseek-ai/dsh-client-connection: ^0.1.1-rc.2`，被跳过（`.update-investigation/BRIEF.md:83-86`）——这是**真越界**（`^0.1.x` 装不下 `0.2.x`），不是预发布陷阱。
+- 0.2.1 上已实测过一次：`@zebbkira/dsh-skills-mcp-manager@0.2.0` 要求 `@deepseek-ai/dsh-client-connection: ^0.1.1-rc.2`，被跳过（本机取证记录）——这是**真越界**（`^0.1.x` 装不下 `0.2.x`），不是预发布陷阱。
 - `--dump-config` 只列出成功加载的 bundle 层；被跳过的那个**不在输出里**，只在 stderr 有提示，容易误判为"配置丢了"。
 
 ### 迁移动作
@@ -96,7 +96,7 @@
 - 反向误判：认为 `0.2.1-rc.5` 的精确 pin 还"差不多能用"，结果它在 0.2.2 上**确实被跳过**。
 
 ### 迁移动作
-1. 只用**真实门**判定，别用裸 semver：清单级扫描请复用 `.update-investigation/reports/_scan.mjs`，但把第 75-79 行的 `semver.satisfies` 换成带 `{ includePrerelease: true }` 的调用（`_scan.mjs:75-79` 现在是无参数版，会高估 skip）。
+1. 只用**真实门**判定，别用裸 semver：清单级扫描请复用 `reports/_scan.mjs`，但把第 75-79 行的 `semver.satisfies` 换成带 `{ includePrerelease: true }` 的调用（`_scan.mjs:75-79` 现在是无参数版，会高估 skip）。
 2. 需要抬范围时**只抬能证明被跳过的包**；新发布的插件写 `^0.2.2-rc.1` 或 `>=0.2.2-rc.1`（两者裸判定也成立，最稳）。
 3. 精确 pin 的包（`0.2.1-rc.5`）必须改范围或升级版本，否则每次启动都 skip。
 
@@ -149,7 +149,7 @@ node --input-type=module -e "import('@deepseek-ai/dsh-official-bundles').then(m=
 
 ### 变更
 - 只是**命名**：同一份 UI 文案从「市场」改成「索引」——0.2.1 `还没有插件市场` / `切换插件市场，当前为 {market}` / `插件市场`（`MKT-UI021:1115/1120/1177`）→ 0.2.2 `还没有插件索引` / `切换插件索引，当前为 {market}` / `插件索引`、`索引源`、`索引 URL`（`MKT-UI:1591-1600`、`MKT-UI:1653`）。
-- **配置字段没改名**：两版都是 `indexes`（URL 数组，默认 `[]`）、`setIndexes(urls)`、`listIndexes()`（`MARKET-RM:31`、`:40-41`；0.2.1 同名，见 `.update-investigation/work/x022c-07b/…/dsh-plugin-market/README.zh.md:31`）。
+- **配置字段没改名**：两版都是 `indexes`（URL 数组，默认 `[]`）、`setIndexes(urls)`、`listIndexes()`（`MARKET-RM:31`、`:40-41`；0.2.1 同名，见 `…/dsh-plugin-market/README.zh.md:31`）。
 - 发现页读取**用户添加的索引文件 URL**（Host 侧 fetch、拒绝重定向、Worker 里严格 UTF-8 解析校验，`MARKET-RM:91`）；默认没有任何索引源，`indexes: []` 时 Host 不发请求（`MARKET-RM:29`）。
 - 「索引生成器排除 private 版本 / 标签 / 默认分支包」是**仓库侧生成器**的规则（`RELNOTES.md:138` 英文 `:278`），生成器不在安装包内（0.2.2 asar 文件清单中无生成器入口）——这一条属**推断**：规则生效在你自己的生成流水线，而不是升级后会帮你清洗已有索引文件。复核方法见文末。
 - 顺带的行为变化：0.2.1 README 明确「**不支持升级**——索引版本更新的已安装组合包报告 `update-available`，升级仍需先卸载再安装」（`…07b/…/dsh-plugin-market/README.zh.md:102`）；0.2.2 增加了更新路径（见下节 5）。
@@ -217,5 +217,5 @@ node --input-type=module -e "import('@deepseek-ai/dsh-official-bundles').then(m=
 
 **推断项（需复核）**
 1. 「索引生成器排除 private」的落点：本文件只引 `RELNOTES.md:138`，生成器不在 0.2.2 asar 内（清单核对无生成器入口）。复核：在仓库执行 `pnpm gen-…`（生成器名见 `OB:143` 注释里的 `gen-official-bundle-catalog`），对一份含 private 版本的源跑一遍，检查输出。
-2. 桌面 profile 是否能直接用 `dsh.cmd --profile desktop …`：本机 CLI 版本信息可读（`--version` → `0.2.1-rc.5`），但应用声明该 profile 由 Electron 独占（`.update-investigation/BRIEF.md:96-97`）。复核：升级后对 desktop 跑一次 `--dump-config`，若被拒绝就走 GUI。
+2. 桌面 profile 是否能直接用 `dsh.cmd --profile desktop …`：本机 CLI 版本信息可读（`--version` → `0.2.1-rc.5`），但应用声明该 profile 由 Electron 独占（本机取证记录）。复核：升级后对 desktop 跑一次 `--dump-config`，若被拒绝就走 GUI。
 3. `purpose`/`stage` 的枚举全集：`diagnostic.js:13` 只给出 `stage` 是 enum，未在本文展开全部取值。复核：读该文件同一 region 的 enum 列表。
