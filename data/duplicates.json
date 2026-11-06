@@ -1,0 +1,98 @@
+[
+  {
+    "community": "@linxin666/dsh-client-ui-plugin-manager",
+    "officialEquivalent": [
+      "@deepseek-ai/dsh-client-ui-plugin-manager",
+      "@deepseek-ai/dsh-client-ui-settings-plugins",
+      "@deepseek-ai/dsh-client-ui-settings-plugin-inventory",
+      "@deepseek-ai/dsh-host-plugin-inventory",
+      "@deepseek-ai/dsh-plugin-manager"
+    ],
+    "verdict": "remove",
+    "confidence": "high",
+    "reason": "0.2.2 ships a rebuilt plugin manager page (rich-text details, third-party package updates, install diagnostics, hot-update rollback). Two managers on the same settings surface will fight over routes and slot registrations."
+  },
+  {
+    "community": "@linxin666/dsh-client-ui-market",
+    "officialEquivalent": [
+      "@deepseek-ai/dsh-client-ui-plugin-market",
+      "@deepseek-ai/dsh-plugin-market",
+      "@deepseek-ai/dsh-plugin-market-index"
+    ],
+    "verdict": "remove",
+    "confidence": "high",
+    "reason": "0.2.2 renames the custom plugin market to '自定义插件索引' (custom plugin index) and reads user index files from the discovery page; the official page owns the same route."
+  },
+  {
+    "community": "@linxin666/dsh-client-ui-community-plugins",
+    "officialEquivalent": [
+      "@deepseek-ai/dsh-client-ui-plugin-market",
+      "@deepseek-ai/dsh-plugin-market-index"
+    ],
+    "verdict": "review",
+    "confidence": "medium",
+    "reason": "Community index/discovery UI overlaps the official plugin index page; keep only if you still need its non-official feed, and expect duplicate entries."
+  },
+  {
+    "community": "@linxin666/dsh-client-ui-preset-center",
+    "officialEquivalent": [
+      "@deepseek-ai/dsh-client-ui-agent-preset",
+      "@deepseek-ai/dsh-agent-preset-registry"
+    ],
+    "verdict": "review",
+    "confidence": "medium",
+    "reason": "Agent presets are an official surface in 0.2.2; a third-party preset browser duplicates navigation and can shadow official preset storage."
+  },
+  {
+    "community": "@linxin666/dsh-client-ui-skill-explorer",
+    "officialEquivalent": [
+      "@deepseek-ai/dsh-client-ui-skill",
+      "@deepseek-ai/dsh-skill",
+      "@deepseek-ai/dsh-skill-badge"
+    ],
+    "verdict": "review",
+    "confidence": "medium",
+    "reason": "Official skill UI exists; keep the explorer only if it adds filesystem browsing the official page lacks."
+  },
+  {
+    "community": "@linxin666/dsh-i18n",
+    "officialEquivalent": [
+      "@deepseek-ai/dsh-client-locale"
+    ],
+    "verdict": "review",
+    "confidence": "medium",
+    "reason": "0.2.2 adds ja/es/fr/de/ru/pt-BR interface text officially; a community locale pack may override or conflict with official locale keys."
+  },
+  {
+    "community": "@linxin666/dsh-update",
+    "officialEquivalent": [
+      "@deepseek-ai/dsh-client-ui-settings-general (update section)",
+      "desktop updater"
+    ],
+    "verdict": "review",
+    "confidence": "medium",
+    "reason": "The desktop app owns update download/install. A plugin update page cannot drive electron-updater correctly and can mislead about install state."
+  },
+  {
+    "community": "@linxin666/dsh-usage",
+    "officialEquivalent": [
+      "@deepseek-ai/dsh-client-ui-stats",
+      "@deepseek-ai/dsh-session-stats",
+      "@deepseek-ai/dsh-token-meter"
+    ],
+    "verdict": "review",
+    "confidence": "low",
+    "reason": "Official per-turn/step statistics are experimental and narrower than a billing-style usage history; overlap is partial."
+  },
+  {
+    "community": "@deepseek-ai/dsh-experimental-tool-worktree",
+    "officialEquivalent": [
+      "@deepseek-ai/dsh-experimental-worktree",
+      "@deepseek-ai/dsh-workspace-changes",
+      "@deepseek-ai/dsh-experimental-forge-bundle"
+    ],
+    "verdict": "remove",
+    "confidence": "high",
+    "reason": "Release note: the Git worktree entry is merged into 'Change requests and worktrees' (forge); the standalone plugin must be removed from dsh.profile.bundles by hand."
+  }
+]

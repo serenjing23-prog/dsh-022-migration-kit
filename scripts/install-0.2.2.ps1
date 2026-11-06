@@ -1,0 +1,108 @@
+# DSH 0.2.2-rc.1 update installer (runs detached from the DSH process tree)
+#
+# 1. verifies the pending installer (sha512 + Authenticode)
+# 2. backs up the profile
+# 3. removes @deepseek-ai/dsh-experimental-tool-worktree from dsh.profile.bundles
+# 4. closes DSH + leftover Host processes
+# 5. runs the installer with the exact electron-updater arguments
+# 6. relaunches DSH and writes a result log
+
+$ErrorActionPreference = 'Continue'
+$log = Join-Path $PSScriptRoot 'install-0.2.2.log'
+function Log([string]$msg) {
+  $line = "[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $msg
+  Add-Content -Path $log -Value $line -Encoding UTF8
+  Write-Output $line
+}
+function Finish([int]$code) { Log "EXIT $code"; exit $code }
+
+Log '=== DSH 0.2.2-rc.1 installer started ==='
+
+$appDir  = Join-Path $env:LOCALAPPDATA 'Programs\DeepSeek Harness'
+$asar    = Join-Path $appDir 'resources\app.asar'
+$profile = Join-Path $env:USERPROFILE '.dsh\profiles\desktop'
+$pending = Join-Path $env:LOCALAPPDATA '@deepseek-aidsh-desktop-updater\pending'
+
+$infoPath = Join-Path $pending 'update-info.json'
+if (-not (Test-Path $infoPath)) { Log "missing $infoPath"; Finish 10 }
+$info = Get-Content $infoPath -Raw | ConvertFrom-Json
+$installer = Join-Path $pending $info.fileName
+if (-not (Test-Path $installer)) { Log "missing installer $installer"; Finish 11 }
+
+# --- verify ---------------------------------------------------------------
+$stream = [IO.File]::OpenRead($installer)
+try { $hash = [Convert]::ToBase64String([Security.Cryptography.SHA512]::Create().ComputeHash($stream)) }
+finally { $stream.Dispose() }
+if ($hash -ne $info.sha512) { Log "sha512 MISMATCH: $hash"; Finish 12 }
+Log 'sha512 verified'
+
+$sig = Get-AuthenticodeSignature $installer
+if ($sig.Status -ne 'Valid') { Log "signature NOT valid: $($sig.Status)"; Finish 13 }
+Log "signature verified: $($sig.SignerCertificate.Subject -replace '\s+', ' ')"
+
+# --- backup ---------------------------------------------------------------
+$backup = Join-Path $env:USERPROFILE ("dsh-backup-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+New-Item -ItemType Directory -Force $backup | Out-Null
+foreach ($f in 'package.json', 'cordis.patch.yml', 'cordis.yml', 'pnpm-lock.yaml') {
+  $src = Join-Path $profile $f
+  if (Test-Path $src) { Copy-Item $src (Join-Path $backup $f) -Force }
+}
+Log "profile backed up -> $backup"
+$asarBefore = if (Test-Path $asar) { (Get-Item $asar).Length } else { 0 }
+Log "app.asar before: $asarBefore bytes"
+
+# --- profile repair: drop the merged worktree bundle ----------------------
+$pkgPath = Join-Path $profile 'package.json'
+$remove = '@deepseek-ai/dsh-experimental-tool-worktree'
+try {
+  $raw = Get-Content $pkgPath -Raw -Encoding UTF8
+  $pkg = $raw | ConvertFrom-Json
+  $before = @($pkg.dsh.profile.bundles).Count
+  $next = @($pkg.dsh.profile.bundles | Where-Object { $_ -ne $remove })
+  if ($next.Count -ne $before) {
+    $pkg.dsh.profile.bundles = $next
+    $json = $pkg | ConvertTo-Json -Depth 30
+    # validate before replacing: must parse and keep the expected bundle count
+    $check = $json | ConvertFrom-Json
+    if (@($check.dsh.profile.bundles).Count -ne $next.Count) { throw 'bundle count mismatch after rewrite' }
+    Copy-Item $pkgPath "$pkgPath.bak-before-022" -Force
+    Set-Content -Path $pkgPath -Value $json -Encoding UTF8
+    Log "removed $remove from dsh.profile.bundles ($before -> $($next.Count))"
+  } else { Log 'worktree bundle not present (already clean)' }
+} catch {
+  Log "profile repair failed, original package.json left untouched: $($_.Exception.Message)"
+}
+
+# --- close DSH ------------------------------------------------------------
+# Force-terminate on purpose: a graceful quit lets electron-updater's
+# autoInstallOnAppQuit spawn its own installer, which would race with ours and
+# is exactly the path that hangs on 0.2.1 (lingering Host handles).
+$procs = Get-Process -Name 'DeepSeek Harness' -ErrorAction SilentlyContinue
+if ($procs) {
+  Log "force-terminating $($procs.Count) DSH process(es)"
+  $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 5
+} else { Log 'DSH was not running' }
+$left = Get-Process -Name 'DeepSeek Harness' -ErrorAction SilentlyContinue
+if ($left) { Log "still running: $($left.Id -join ',')"; $left | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3 }
+
+# --- install --------------------------------------------------------------
+Log "running installer: $installer --updated /S --force-run"
+$p = Start-Process -FilePath $installer -ArgumentList '--updated', '/S', '--force-run' -PassThru
+if (-not $p.WaitForExit(600000)) { Log 'installer did not exit in 10 minutes'; }
+else { Log "installer exit code: $($p.ExitCode)" }
+
+Start-Sleep -Seconds 10
+$asarAfter = if (Test-Path $asar) { (Get-Item $asar).Length } else { 0 }
+Log "app.asar after: $asarAfter bytes"
+
+# --- relaunch -------------------------------------------------------------
+$exe = Join-Path $appDir 'DeepSeek Harness.exe'
+if (-not (Get-Process -Name 'DeepSeek Harness' -ErrorAction SilentlyContinue)) {
+  if (Test-Path $exe) { Start-Process -FilePath $exe; Log 'relaunched DSH' }
+  else { Log "app executable missing: $exe" }
+} else { Log 'DSH already running after install' }
+
+if ($asarAfter -ne $asarBefore -and $asarAfter -gt 0) { Log 'RESULT: app.asar replaced (update applied)'; Finish 0 }
+Log 'RESULT: app.asar unchanged (update NOT applied)'
+Finish 20
