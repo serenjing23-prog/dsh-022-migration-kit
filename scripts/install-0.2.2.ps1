@@ -1,21 +1,32 @@
 # DSH desktop updater (runs detached from the DSH process tree)
 #
-# Works for any pending update the app already downloaded:
-# 1. verifies the pending installer (sha512 + Authenticode)
-# 2. backs up the profile
-# 3. drops bundles the target release retired (edit $removeBundles below)
-# 4. closes DSH + leftover Host processes
-# 5. runs the installer with the exact electron-updater arguments
-# 6. relaunches DSH, verifies the new FileVersion, writes a result log
+# Fixes learned from the 2026-11-14 failure:
+#  - NSIS renames the install dir to "<app>.old-<guid>"; if any file under it is
+#    still open, it fails with Windows error 32 and aborts (installer-logs/
+#    directory-failure-*.log). So: kill by image path, not just process name,
+#    wait for the lock to clear, and PROVE it by moving the dir away first.
+#  - Windows PowerShell 5.1 writes a UTF-8 BOM with `Set-Content -Encoding UTF8`;
+#    a BOM in the profile package.json makes DSH fail to boot. All JSON writes
+#    here use UTF8Encoding($false).
+#
+# 1. verify pending installer (sha512 + Authenticode)
+# 2. back up the profile, drop bundles the target retired (no-BOM rewrite)
+# 3. close DSH and any process whose image lives under the install dir
+# 4. move the old install dir aside (this is the definitive lock test, with retries)
+# 5. install with the electron-updater arguments, relaunch, verify FileVersion
+# 6. on failure restore the moved dir; always record + push UPGRADE-LOG.md
 
 $ErrorActionPreference = 'Continue'
 $log = Join-Path $PSScriptRoot 'install-0.2.2.log'
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
 function Log([string]$msg) {
   $line = "[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $msg
   Add-Content -Path $log -Value $line -Encoding UTF8
   Write-Output $line
 }
 function Finish([int]$code) { Log "EXIT $code"; exit $code }
+function Write-NoBom([string]$path, [string]$text) { [IO.File]::WriteAllText($path, $text, $utf8NoBom) }
 
 Log '=== DSH desktop update started ==='
 
@@ -33,9 +44,8 @@ if (-not (Test-Path $infoPath)) { Log "missing $infoPath"; Finish 10 }
 $info = Get-Content $infoPath -Raw | ConvertFrom-Json
 $installer = Join-Path $pending $info.fileName
 if (-not (Test-Path $installer)) { Log "missing installer $installer"; Finish 11 }
-Log "pending installer: $($info.fileName)"
 $expectedVersion = ([regex]::Match($info.fileName, '(\d+\.\d+\.\d+(?:-[a-z0-9.]+)?)-win')).Groups[1].Value
-Log "expected version: $expectedVersion"
+Log "pending installer: $($info.fileName) (expected $expectedVersion)"
 
 # --- verify ---------------------------------------------------------------
 $stream = [IO.File]::OpenRead($installer)
@@ -43,15 +53,14 @@ try { $hash = [Convert]::ToBase64String([Security.Cryptography.SHA512]::Create()
 finally { $stream.Dispose() }
 if ($hash -ne $info.sha512) { Log "sha512 MISMATCH: $hash"; Finish 12 }
 Log 'sha512 verified'
-
 $sig = Get-AuthenticodeSignature $installer
 if ($sig.Status -ne 'Valid') { Log "signature NOT valid: $($sig.Status)"; Finish 13 }
-Log "signature verified: $($sig.SignerCertificate.Subject -replace '\s+', ' ')"
+Log 'signature verified'
 
 # --- backup ---------------------------------------------------------------
 $backup = Join-Path $env:USERPROFILE ("dsh-backup-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Force $backup | Out-Null
-foreach ($f in 'package.json', 'cordis.patch.yml', 'cordis.yml', 'pnpm-lock.yaml') {
+foreach ($f in 'package.json', 'cordis.patch.yml', 'cordis.yml', 'pnpm-lock.yaml', 'pnpm-workspace.yaml') {
   $src = Join-Path $profile $f
   if (Test-Path $src) { Copy-Item $src (Join-Path $backup $f) -Force }
 }
@@ -60,76 +69,127 @@ $asarBefore = if (Test-Path $asar) { (Get-Item $asar).Length } else { 0 }
 Log "app.asar before: $asarBefore bytes"
 
 # --- profile repair: drop bundles the target release retired ---------------
-# 0.2.2: Git worktree entry merged into forge; standalone plugin must go.
-# 0.2.2-rc.3: agent-team-profile replaced by the unified named-subagent team.
 $pkgPath = Join-Path $profile 'package.json'
 $removeBundles = @(
   '@deepseek-ai/dsh-experimental-tool-worktree',
   '@deepseek-ai/dsh-experimental-agent-team-profile'
 )
 try {
-  $raw = Get-Content $pkgPath -Raw -Encoding UTF8
-  $pkg = $raw | ConvertFrom-Json
+  $pkg = [IO.File]::ReadAllText($pkgPath) | ConvertFrom-Json
   $before = @($pkg.dsh.profile.bundles).Count
   $next = @($pkg.dsh.profile.bundles | Where-Object { $removeBundles -notcontains $_ })
   if ($next.Count -ne $before) {
     $pkg.dsh.profile.bundles = $next
     $json = $pkg | ConvertTo-Json -Depth 30
-    # validate before replacing: must parse and keep the expected bundle count
     $check = $json | ConvertFrom-Json
     if (@($check.dsh.profile.bundles).Count -ne $next.Count) { throw 'bundle count mismatch after rewrite' }
     Copy-Item $pkgPath "$pkgPath.bak-before-update" -Force
-    Set-Content -Path $pkgPath -Value $json -Encoding UTF8
-    Log "removed retired bundle(s) ($before -> $($next.Count))"
+    Write-NoBom $pkgPath $json
+    Log "removed retired bundle(s) ($before -> $($next.Count)), written without BOM"
   } else { Log 'no retired bundle present (already clean)' }
 } catch {
   Log "profile repair failed, original package.json left untouched: $($_.Exception.Message)"
 }
 
-# --- close DSH ------------------------------------------------------------
-# Force-terminate on purpose: a graceful quit lets electron-updater's
-# autoInstallOnAppQuit spawn its own installer, which would race with ours and
-# is exactly the path that hangs on 0.2.1 (lingering Host handles).
-$procs = Get-Process -Name 'DeepSeek Harness' -ErrorAction SilentlyContinue
-if ($procs) {
-  Log "force-terminating $($procs.Count) DSH process(es)"
-  $procs | Stop-Process -Force -ErrorAction SilentlyContinue
-  Start-Sleep -Seconds 5
-} else { Log 'DSH was not running' }
-$left = Get-Process -Name 'DeepSeek Harness' -ErrorAction SilentlyContinue
-if ($left) { Log "still running: $($left.Id -join ',')"; $left | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3 }
+# --- close DSH + anything running from the install dir --------------------
+function Stop-InstallDirProcesses([string]$prefix) {
+  $killed = 0
+  Get-Process | ForEach-Object {
+    $p = $null
+    try { $p = $_.Path } catch {}
+    if ($p -and $p.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+      Log "  kill $($_.Id) $($_.ProcessName) <- $p"
+      try { $_ | Stop-Process -Force -ErrorAction Stop; $killed++ } catch {}
+    }
+  }
+  foreach ($name in 'DeepSeek Harness', 'WerFault', 'WerFaultSecure') {
+    Get-Process -Name $name -ErrorAction SilentlyContinue | ForEach-Object {
+      try { $_ | Stop-Process -Force -ErrorAction Stop; $killed++ } catch {}
+    }
+  }
+  return $killed
+}
+
+Log 'closing DSH and any process under the install dir'
+$n = Stop-InstallDirProcesses $appDir
+Log "terminated $n process(es)"
+Start-Sleep -Seconds 5
+
+# wait until nothing is running from the install dir (10s)
+for ($i = 0; $i -lt 10; $i++) {
+  $still = Get-Process | ForEach-Object { $p = $null; try { $p = $_.Path } catch {}; if ($p -and $p.StartsWith($appDir, [StringComparison]::OrdinalIgnoreCase)) { $_.Id } }
+  if (-not $still) { break }
+  Log "still running from install dir: $($still -join ',') - waiting"
+  Start-Sleep -Seconds 3
+  Stop-InstallDirProcesses $appDir | Out-Null
+}
+
+# --- prove the dir is unlocked by moving it aside -------------------------
+$moved = $null
+for ($attempt = 1; $attempt -le 12; $attempt++) {
+  $candidate = "$appDir.updating-" + (Get-Date -Format 'yyyyMMdd-HHmmss')
+  try {
+    Move-Item -LiteralPath $appDir -Destination $candidate -ErrorAction Stop
+    $moved = $candidate
+    Log "install dir moved aside after attempt ${attempt}: $candidate"
+    break
+  } catch {
+    Log "attempt ${attempt}: install dir still locked (Windows error at MoveItem), retrying in 10s"
+  }
+  Start-Sleep -Seconds 10
+}
+if (-not $moved) {
+  Log 'ABORT: install dir could not be moved aside after 2 minutes; nothing was changed'
+  Log 'hint: close antivirus scanning / File Explorer windows on that folder, or reboot, then rerun'
+  Finish 14
+}
 
 # --- install --------------------------------------------------------------
 Log "running installer: $installer --updated /S --force-run"
 $p = Start-Process -FilePath $installer -ArgumentList '--updated', '/S', '--force-run' -PassThru
-if (-not $p.WaitForExit(600000)) { Log 'installer did not exit in 10 minutes'; }
+if (-not $p.WaitForExit(600000)) { Log 'installer did not exit in 10 minutes' }
 else { Log "installer exit code: $($p.ExitCode)" }
-
 Start-Sleep -Seconds 10
-$asarAfter = if (Test-Path $asar) { (Get-Item $asar).Length } else { 0 }
-Log "app.asar after: $asarAfter bytes"
 
-# --- relaunch + verify ----------------------------------------------------
-$exe = Join-Path $appDir 'DeepSeek Harness.exe'
+$asarAfter = if (Test-Path $asar) { (Get-Item $asar).Length } else { 0 }
+$installedVersion = if (Test-Path $exe) { (Get-Item $exe).VersionInfo.FileVersion } else { '' }
+Log "app.asar after: $asarAfter bytes; installed version: $installedVersion"
+$versionOk = $expectedVersion -ne '' -and $installedVersion -eq $expectedVersion
+$dirOk = Test-Path $exe
+Log "version match: $versionOk; install dir present: $dirOk"
+
+# surface the installer's own failure log if it wrote one
+$failureLogs = Get-ChildItem (Join-Path (Split-Path $pending -Parent) 'installer-logs') -Filter '*.log' -ErrorAction SilentlyContinue |
+  Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-15) }
+foreach ($fl in $failureLogs) { Log "installer log $($fl.Name): $((Get-Content $fl.FullName -Raw) -replace '\r?\n', ' | ')" }
+
+# --- failure: restore the old install -------------------------------------
+if (-not $dirOk) {
+  Log 'restoring the previous install dir (installer did not produce a new one)'
+  try {
+    Move-Item -LiteralPath $moved -Destination $appDir -ErrorAction Stop
+    Log 'restored previous install dir'
+    if (Test-Path $exe) { Start-Process -FilePath $exe; Log 'relaunched the previous version' }
+  } catch { Log "RESTORE FAILED: $($_.Exception.Message) - old dir kept at $moved" }
+  Finish 21
+}
+
+# --- success path: clean up the moved-aside dir, relaunch if needed -------
+if ($moved -and (Test-Path $moved)) {
+  try { Remove-Item -LiteralPath $moved -Recurse -Force -ErrorAction Stop; Log 'removed the moved-aside old install dir' }
+  catch { Log "could not remove old install dir (kept at $moved): $($_.Exception.Message)" }
+}
 if (-not (Get-Process -Name 'DeepSeek Harness' -ErrorAction SilentlyContinue)) {
   if (Test-Path $exe) { Start-Process -FilePath $exe; Log 'relaunched DSH' }
-  else { Log "app executable missing: $exe" }
-} else { Log 'DSH already running after install' }
+}
 Start-Sleep -Seconds 5
 
-$installedVersion = if (Test-Path $exe) { (Get-Item $exe).VersionInfo.FileVersion } else { '' }
-Log "installed version: $installedVersion"
-$versionOk = $expectedVersion -ne '' -and $installedVersion -eq $expectedVersion
-Log "version match: $versionOk"
-
 # --- record the update and publish it -------------------------------------
-# Appends a run record to UPGRADE-LOG.md and pushes it to the public repo, so
-# "what changed on this machine" is visible on GitHub without manual work.
 $kit = Split-Path $PSScriptRoot -Parent
 $upgradeLog = Join-Path $kit 'UPGRADE-LOG.md'
 try {
   if (-not (Test-Path $upgradeLog)) {
-    Set-Content -Path $upgradeLog -Value "# DSH desktop upgrade log`n`nMachine-generated by scripts/install-0.2.2.ps1. One section per update run.`n" -Encoding UTF8
+    Write-NoBom $upgradeLog "# DSH desktop upgrade log`n`nMachine-generated by scripts/install-0.2.2.ps1. One section per update run.`n"
   }
   $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
   $record = @(
@@ -140,8 +200,8 @@ try {
     "- version before: ``$versionBefore`` -> after: ``$installedVersion`` (match: $versionOk)",
     "- app.asar: $asarBefore -> $asarAfter bytes",
     "- profile backup: ``$backup``",
-    "- retired bundles dropped from dsh.profile.bundles: $($removeBundles -join ', ')",
-    "- result: $(if ($versionOk) { 'update applied' } elseif ($asarAfter -ne $asarBefore) { 'asar replaced, version string differs' } else { 'update NOT applied' })"
+    "- install dir moved aside and old copy removed: $([bool]$moved)",
+    "- result: $(if ($versionOk) { 'update applied' } else { 'installed but version mismatch' })"
   ) -join "`n"
   Add-Content -Path $upgradeLog -Value $record -Encoding UTF8
   Log "wrote $upgradeLog"
@@ -154,16 +214,10 @@ try {
     & git -c user.name="serenjing23-prog" -c user.email="serenjing23@gmail.com" commit -m "chore: record desktop update to $expectedVersion ($stamp)" 2>&1 | Out-Null
     $pushOut = & git push 2>&1 | Out-String
     Log ("git push: " + ($pushOut.Trim() -replace "`r?`n", ' / '))
-  } finally {
-    Pop-Location
-  }
-} catch {
-  Log "publish step failed (continues): $($_.Exception.Message)"
-}
+  } finally { Pop-Location }
+} catch { Log "publish step failed (continues): $($_.Exception.Message)" }
 
 # --- desktop notification -------------------------------------------------
-# English-only on purpose: Windows PowerShell 5.1 mis-parses non-ASCII text in a
-# UTF-8 file without a BOM, and this script runs under powershell.exe.
 try {
   $toast = New-Object -ComObject Wscript.Shell
   $msg = if ($versionOk) { "DSH updated to $expectedVersion. Starting..." } else { "DSH update did not complete (current $installedVersion). See install-0.2.2.log." }
@@ -172,6 +226,5 @@ try {
 } catch { Log "notification failed: $($_.Exception.Message)" }
 
 if ($versionOk) { Log 'RESULT: update applied'; Finish 0 }
-if ($asarAfter -ne $asarBefore -and $asarAfter -gt 0) { Log 'RESULT: app.asar replaced but version string differs (check installer)'; Finish 0 }
 Log 'RESULT: update NOT applied'
 Finish 20

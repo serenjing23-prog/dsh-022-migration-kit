@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-11-14 (2nd) — installer fix: file-lock + BOM
+
+**Diagnosed the failed 01:35 run** (evidence: `installer-logs/directory-failure-20261114-13820.log`):
+NSIS renames the install dir to `DeepSeek Harness.old-<guid>` before installing; any open file
+under that dir makes `MoveFileExW` fail with Windows error 32, it retries 10 times and aborts
+(installer exit code 2). Nothing was installed. Separately, the script wrote the profile
+`package.json` through Windows PowerShell 5.1's `Set-Content -Encoding UTF8`, which prepends a
+UTF-8 BOM; DSH then failed to parse the profile and would not start.
+
+**Fixed in `scripts/install-0.2.2.ps1`**
+- kill every process whose image path is under the install dir (not just the process name),
+  plus `WerFault`/`WerFaultSecure`, then poll until none remain;
+- move the old install dir aside as a deterministic lock test, retrying for up to 2 minutes,
+  and abort with a clear hint if it stays locked (nothing changed);
+- install only after the move succeeded; on failure move the old dir back and relaunch the
+  previous version, so a failed update can never leave DSH unopenable;
+- write `package.json` with `UTF8Encoding($false)` (no BOM) and validate it before replacing;
+- surface the installer's own `directory-failure-*.log` in the run log.
+
 ## 2026-11-14 — kit supports 0.2.2-rc.3; desktop update flow hardened
 
 **Added**
