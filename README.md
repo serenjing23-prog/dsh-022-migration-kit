@@ -38,6 +38,8 @@ semver.satisfies(runtimeVersion, range, { includePrerelease: true })
 | `references/plugin-api-migration.md` | 插件作者用：工具注册、投影异步化、模型路由、请求头、清单门禁的 before/after |
 | `references/upgrade-runbook.md` | Windows 升级 runbook：校验 → 备份 → 预检 → 关进程 → 静默安装 → 验证 → 回滚 |
 | `scripts/check-profile-compat.mjs` | 零依赖预检脚本：算出升级后哪些 bundle 会被 skip、哪些退役、哪些和官方重复 |
+| `scripts/install-0.2.2.ps1` | 版本无关的桌面升级脚本：校验 → 备份 → 清退役 bundle → 强杀 Host → 静默安装 → 校验版本 → 记 UPGRADE-LOG → 推送 GitHub |
+| `CHANGELOG.md` / `UPGRADE-LOG.md` | 技能包变更记录 / 每次本机升级的机器生成记录（脚本自动追加并推送） |
 | `data/official-bundles-0-2-2-rc-3.json` / `...-rc-1.json` | 从对应版本 `@deepseek-ai/dsh-official-bundles` 抽出的官方组合包清单（rc.3 起 `agent-team-profile` 退役、新增 `deepseek-chat-import`） |
 | `data/duplicates.json` | 社区插件 ↔ 官方新功能的重复对照表（官方优先） |
 
