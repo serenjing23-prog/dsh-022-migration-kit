@@ -200,8 +200,10 @@ const duplicateByName = new Map();
 for (const row of duplicates) for (const name of [].concat(row.community)) duplicateByName.set(name, row);
 
 function inspect(name) {
+  const isRetired = retired.has(name);
   const found = resolvePackage(profileDir, name);
   if (!found) {
+    if (isRetired) return { name, status: 'retired', detail: `retired by ${target}: app-boot removes it on boot; drop it from dsh.profile.bundles` };
     return name.startsWith('@deepseek-ai/')
       ? { name, status: 'app-provided', detail: 'shipped by the DSH installation' }
       : { name, status: 'missing', detail: 'in dsh.profile.bundles but not installed — it will be skipped' };

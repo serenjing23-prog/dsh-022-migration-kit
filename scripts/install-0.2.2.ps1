@@ -1,11 +1,12 @@
-# DSH 0.2.2-rc.1 update installer (runs detached from the DSH process tree)
+# DSH desktop updater (runs detached from the DSH process tree)
 #
+# Works for any pending update the app already downloaded:
 # 1. verifies the pending installer (sha512 + Authenticode)
 # 2. backs up the profile
-# 3. removes @deepseek-ai/dsh-experimental-tool-worktree from dsh.profile.bundles
+# 3. drops bundles the target release retired (edit $removeBundles below)
 # 4. closes DSH + leftover Host processes
 # 5. runs the installer with the exact electron-updater arguments
-# 6. relaunches DSH and writes a result log
+# 6. relaunches DSH, verifies the new FileVersion, writes a result log
 
 $ErrorActionPreference = 'Continue'
 $log = Join-Path $PSScriptRoot 'install-0.2.2.log'
@@ -16,7 +17,7 @@ function Log([string]$msg) {
 }
 function Finish([int]$code) { Log "EXIT $code"; exit $code }
 
-Log '=== DSH 0.2.2-rc.1 installer started ==='
+Log '=== DSH desktop update started ==='
 
 $appDir  = Join-Path $env:LOCALAPPDATA 'Programs\DeepSeek Harness'
 $asar    = Join-Path $appDir 'resources\app.asar'
@@ -28,6 +29,9 @@ if (-not (Test-Path $infoPath)) { Log "missing $infoPath"; Finish 10 }
 $info = Get-Content $infoPath -Raw | ConvertFrom-Json
 $installer = Join-Path $pending $info.fileName
 if (-not (Test-Path $installer)) { Log "missing installer $installer"; Finish 11 }
+Log "pending installer: $($info.fileName)"
+$expectedVersion = ([regex]::Match($info.fileName, '(\d+\.\d+\.\d+(?:-[a-z0-9.]+)?)-win')).Groups[1].Value
+Log "expected version: $expectedVersion"
 
 # --- verify ---------------------------------------------------------------
 $stream = [IO.File]::OpenRead($installer)
@@ -51,24 +55,29 @@ Log "profile backed up -> $backup"
 $asarBefore = if (Test-Path $asar) { (Get-Item $asar).Length } else { 0 }
 Log "app.asar before: $asarBefore bytes"
 
-# --- profile repair: drop the merged worktree bundle ----------------------
+# --- profile repair: drop bundles the target release retired ---------------
+# 0.2.2: Git worktree entry merged into forge; standalone plugin must go.
+# 0.2.2-rc.3: agent-team-profile replaced by the unified named-subagent team.
 $pkgPath = Join-Path $profile 'package.json'
-$remove = '@deepseek-ai/dsh-experimental-tool-worktree'
+$removeBundles = @(
+  '@deepseek-ai/dsh-experimental-tool-worktree',
+  '@deepseek-ai/dsh-experimental-agent-team-profile'
+)
 try {
   $raw = Get-Content $pkgPath -Raw -Encoding UTF8
   $pkg = $raw | ConvertFrom-Json
   $before = @($pkg.dsh.profile.bundles).Count
-  $next = @($pkg.dsh.profile.bundles | Where-Object { $_ -ne $remove })
+  $next = @($pkg.dsh.profile.bundles | Where-Object { $removeBundles -notcontains $_ })
   if ($next.Count -ne $before) {
     $pkg.dsh.profile.bundles = $next
     $json = $pkg | ConvertTo-Json -Depth 30
     # validate before replacing: must parse and keep the expected bundle count
     $check = $json | ConvertFrom-Json
     if (@($check.dsh.profile.bundles).Count -ne $next.Count) { throw 'bundle count mismatch after rewrite' }
-    Copy-Item $pkgPath "$pkgPath.bak-before-022" -Force
+    Copy-Item $pkgPath "$pkgPath.bak-before-update" -Force
     Set-Content -Path $pkgPath -Value $json -Encoding UTF8
-    Log "removed $remove from dsh.profile.bundles ($before -> $($next.Count))"
-  } else { Log 'worktree bundle not present (already clean)' }
+    Log "removed retired bundle(s) ($before -> $($next.Count))"
+  } else { Log 'no retired bundle present (already clean)' }
 } catch {
   Log "profile repair failed, original package.json left untouched: $($_.Exception.Message)"
 }
@@ -96,13 +105,20 @@ Start-Sleep -Seconds 10
 $asarAfter = if (Test-Path $asar) { (Get-Item $asar).Length } else { 0 }
 Log "app.asar after: $asarAfter bytes"
 
-# --- relaunch -------------------------------------------------------------
+# --- relaunch + verify ----------------------------------------------------
 $exe = Join-Path $appDir 'DeepSeek Harness.exe'
 if (-not (Get-Process -Name 'DeepSeek Harness' -ErrorAction SilentlyContinue)) {
   if (Test-Path $exe) { Start-Process -FilePath $exe; Log 'relaunched DSH' }
   else { Log "app executable missing: $exe" }
 } else { Log 'DSH already running after install' }
+Start-Sleep -Seconds 5
 
-if ($asarAfter -ne $asarBefore -and $asarAfter -gt 0) { Log 'RESULT: app.asar replaced (update applied)'; Finish 0 }
-Log 'RESULT: app.asar unchanged (update NOT applied)'
+$installedVersion = if (Test-Path $exe) { (Get-Item $exe).VersionInfo.FileVersion } else { '' }
+Log "installed version: $installedVersion"
+$versionOk = $expectedVersion -ne '' -and $installedVersion -eq $expectedVersion
+Log "version match: $versionOk"
+
+if ($versionOk) { Log 'RESULT: update applied'; Finish 0 }
+if ($asarAfter -ne $asarBefore -and $asarAfter -gt 0) { Log 'RESULT: app.asar replaced but version string differs (check installer)'; Finish 0 }
+Log 'RESULT: update NOT applied'
 Finish 20
