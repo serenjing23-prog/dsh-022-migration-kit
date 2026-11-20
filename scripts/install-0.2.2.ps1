@@ -47,6 +47,15 @@ if (-not (Test-Path $installer)) { Log "missing installer $installer"; Finish 11
 $expectedVersion = ([regex]::Match($info.fileName, '(\d+\.\d+\.\d+(?:-[a-z0-9.]+)?)-win')).Groups[1].Value
 Log "pending installer: $($info.fileName) (expected $expectedVersion)"
 
+# idempotent: already on the target version (e.g. this script re-ran from RunOnce)
+if ($versionBefore -eq $expectedVersion) {
+  Log "already on $expectedVersion; nothing to do"
+  if (-not (Get-Process -Name 'DeepSeek Harness' -ErrorAction SilentlyContinue) -and (Test-Path $exe)) {
+    Start-Process -FilePath $exe; Log 'relaunched DSH'
+  }
+  Finish 0
+}
+
 # --- verify ---------------------------------------------------------------
 $stream = [IO.File]::OpenRead($installer)
 try { $hash = [Convert]::ToBase64String([Security.Cryptography.SHA512]::Create().ComputeHash($stream)) }
@@ -92,55 +101,84 @@ try {
 }
 
 # --- close DSH + anything running from the install dir --------------------
-function Stop-InstallDirProcesses([string]$prefix) {
-  $killed = 0
+# A plain Stop-Process does not kill children. The desktop Host is a separate
+# node process that keeps app.asar mapped, so the install dir stays locked for
+# minutes after the Electron processes die. Kill the whole tree with
+# `taskkill /T`, then catch anything that still has modules loaded from the
+# install dir (process.Path may be unreadable for elevated/system processes,
+# but module paths usually are readable).
+function Kill-InstallDirHolders([string]$prefix) {
+  foreach ($p in (Get-Process -Name 'DeepSeek Harness' -ErrorAction SilentlyContinue)) {
+    Log "  taskkill /T /F $($p.Id) $($p.ProcessName)"
+    & taskkill /PID $p.Id /T /F 2>&1 | Out-Null
+  }
   Get-Process | ForEach-Object {
-    $p = $null
-    try { $p = $_.Path } catch {}
-    if ($p -and $p.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
-      Log "  kill $($_.Id) $($_.ProcessName) <- $p"
-      try { $_ | Stop-Process -Force -ErrorAction Stop; $killed++ } catch {}
+    $proc = $_
+    $hit = $null
+    try { $hit = $proc.Modules | Where-Object { $_.FileName -and $_.FileName.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1 } catch {}
+    if (-not $hit) { try { if ($proc.Path -and $proc.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { $hit = $proc } } catch {} }
+    if ($hit) {
+      Log "  kill $($proc.Id) $($proc.ProcessName) (holds install dir)"
+      & taskkill /PID $proc.Id /T /F 2>&1 | Out-Null
     }
   }
-  foreach ($name in 'DeepSeek Harness', 'WerFault', 'WerFaultSecure') {
-    Get-Process -Name $name -ErrorAction SilentlyContinue | ForEach-Object {
-      try { $_ | Stop-Process -Force -ErrorAction Stop; $killed++ } catch {}
-    }
+  foreach ($name in 'WerFault', 'WerFaultSecure') {
+    Get-Process -Name $name -ErrorAction SilentlyContinue | ForEach-Object { & taskkill /PID $_.Id /T /F 2>&1 | Out-Null }
   }
-  return $killed
 }
 
 Log 'closing DSH and any process under the install dir'
-$n = Stop-InstallDirProcesses $appDir
-Log "terminated $n process(es)"
+Kill-InstallDirHolders $appDir
 Start-Sleep -Seconds 5
 
-# wait until nothing is running from the install dir (10s)
-for ($i = 0; $i -lt 10; $i++) {
-  $still = Get-Process | ForEach-Object { $p = $null; try { $p = $_.Path } catch {}; if ($p -and $p.StartsWith($appDir, [StringComparison]::OrdinalIgnoreCase)) { $_.Id } }
-  if (-not $still) { break }
-  Log "still running from install dir: $($still -join ',') - waiting"
+# wait until nothing is running from the install dir (up to 60s)
+for ($i = 0; $i -lt 20; $i++) {
+  $still = @()
+  Get-Process | ForEach-Object {
+    $proc = $_
+    $hit = $null
+    try { $hit = $proc.Modules | Where-Object { $_.FileName -and $_.FileName.StartsWith($appDir, [StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1 } catch {}
+    if (-not $hit) { try { if ($proc.Path -and $proc.Path.StartsWith($appDir, [StringComparison]::OrdinalIgnoreCase)) { $hit = $proc } } catch {} }
+    if ($hit) { $still += "$($proc.Id):$($proc.ProcessName)" }
+  }
+  if (-not $still) { Log 'no process is using the install dir'; break }
+  Log "still using install dir: $($still -join ', ') - waiting"
   Start-Sleep -Seconds 3
-  Stop-InstallDirProcesses $appDir | Out-Null
+  Kill-InstallDirHolders $appDir
 }
 
 # --- prove the dir is unlocked by moving it aside -------------------------
 $moved = $null
-for ($attempt = 1; $attempt -le 12; $attempt++) {
+for ($attempt = 1; $attempt -le 30; $attempt++) {
   $candidate = "$appDir.updating-" + (Get-Date -Format 'yyyyMMdd-HHmmss')
   try {
-    Move-Item -LiteralPath $appDir -Destination $candidate -ErrorAction Stop
+    [IO.Directory]::Move($appDir, $candidate)
     $moved = $candidate
     Log "install dir moved aside after attempt ${attempt}: $candidate"
     break
   } catch {
-    Log "attempt ${attempt}: install dir still locked (Windows error at MoveItem), retrying in 10s"
+    Log "attempt ${attempt}: move failed - $($_.Exception.GetType().Name): $($_.Exception.Message)"
   }
   Start-Sleep -Seconds 10
 }
 if (-not $moved) {
-  Log 'ABORT: install dir could not be moved aside after 2 minutes; nothing was changed'
+  Log 'ABORT: install dir could not be moved aside after 5 minutes; nothing was changed'
   Log 'hint: close antivirus scanning / File Explorer windows on that folder, or reboot, then rerun'
+  # Arm a RunOnce entry: after the next logon nothing holds the install dir, so the
+  # same script can finish the update before the user opens DSH.
+  try {
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce'
+    $cmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $PSScriptRoot 'install-0.2.2.ps1') + '"'
+    Set-ItemProperty -Path $runKey -Name 'DSHUpdate' -Value $cmd -Force
+    Log 'armed RunOnce\DSHUpdate: the update will run automatically after the next logon'
+  } catch { Log "failed to arm RunOnce: $($_.Exception.Message)" }
+  try {
+    $w = New-Object -ComObject Wscript.Shell
+    $w.Popup("DSH update could not run while DSH was open. Reboot the computer: the update will finish automatically after you sign in.", 20, 'DSH update', 48) | Out-Null
+  } catch {}
+  if (-not (Get-Process -Name 'DeepSeek Harness' -ErrorAction SilentlyContinue)) {
+    if (Test-Path $exe) { Start-Process -FilePath $exe; Log 'relaunched the existing version so DSH is not left closed' }
+  }
   Finish 14
 }
 
