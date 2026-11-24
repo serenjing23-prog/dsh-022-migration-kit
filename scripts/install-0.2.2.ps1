@@ -74,6 +74,25 @@ foreach ($f in 'package.json', 'cordis.patch.yml', 'cordis.yml', 'pnpm-lock.yaml
   if (Test-Path $src) { Copy-Item $src (Join-Path $backup $f) -Force }
 }
 Log "profile backed up -> $backup"
+
+# --- BOM guard ------------------------------------------------------------
+# A UTF-8 BOM at the head of any DSH config file makes the next start die with
+#   DesktopHostFatalError: failed to parse patches ... YAMLParseError: <BOM> insert:
+# (the leading bytes EF BB BF decode as mojibake). PowerShell 5.1's `Set-Content -Encoding UTF8`
+# writes exactly that BOM, so this check runs before and after every install.
+$bomScript = Join-Path $PSScriptRoot 'check-bom.mjs'
+$nodeExe = $null
+foreach ($cand in @($env:DSH_NODE_EXECUTABLE, 'node', 'C:\Program Files\nodejs\node.exe')) {
+  if (-not $cand) { continue }
+  $resolved = if (Test-Path $cand) { $cand } else { (Get-Command $cand -ErrorAction SilentlyContinue).Source }
+  if ($resolved) { $nodeExe = $resolved; break }
+}
+if ((Test-Path $bomScript) -and $nodeExe) {
+  try {
+    $bomOut = & $nodeExe $bomScript --fix 2>&1 | Out-String
+    Log ("BOM check (pre-install): " + ($bomOut.Trim() -replace "`r?`n", ' / '))
+  } catch { Log "BOM check (pre-install) failed: $($_.Exception.Message)" }
+} else { Log 'BOM check skipped: check-bom.mjs or a node executable not found' }
 $asarBefore = if (Test-Path $asar) { (Get-Item $asar).Length } else { 0 }
 Log "app.asar before: $asarBefore bytes"
 
@@ -195,6 +214,14 @@ Log "app.asar after: $asarAfter bytes; installed version: $installedVersion"
 $versionOk = $expectedVersion -ne '' -and $installedVersion -eq $expectedVersion
 $dirOk = Test-Path $exe
 Log "version match: $versionOk; install dir present: $dirOk"
+
+# --- BOM guard, after the install touched profile files -------------------
+if ((Test-Path $bomScript) -and $nodeExe) {
+  try {
+    $bomOut2 = & $nodeExe $bomScript --fix 2>&1 | Out-String
+    Log ("BOM check (post-install): " + ($bomOut2.Trim() -replace "`r?`n", ' / '))
+  } catch { Log "BOM check (post-install) failed: $($_.Exception.Message)" }
+}
 
 # surface the installer's own failure log if it wrote one
 $failureLogs = Get-ChildItem (Join-Path (Split-Path $pending -Parent) 'installer-logs') -Filter '*.log' -ErrorAction SilentlyContinue |
